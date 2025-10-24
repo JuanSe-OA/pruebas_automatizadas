@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["content","totalElements"],
+  "properties": {
+    "content": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["username","email"],
+        "properties": {
+          "id": { "type": ["integer","string"] },
+          "username": { "type": "string" },
+          "email": { "type": "string", "format": "email" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "totalElements": { "type": ["integer","number"] }
+  },
+  "additionalProperties": true
+}

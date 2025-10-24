@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["username", "email", "phoneNumber"],
+  "properties": {
+    "id": { "type": ["integer","string"] },
+    "username": { "type": "string", "minLength": 3 },
+    "email": { "type": "string", "format": "email" },
+    "phoneNumber": { "type": "string" }
+  },
+  "additionalProperties": true
+}
