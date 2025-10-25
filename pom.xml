@@ -20,6 +20,12 @@
         <restassured.version>5.4.0</restassured.version>
         <junit.version>5.10.2</junit.version>
         <jackson.version>2.17.2</jackson.version>
+
+        <sonar.projectKey>pruebas-auth</sonar.projectKey>
+        <sonar.projectName>pruebas-auth</sonar.projectName>
+        <sonar.sources>src/main/java</sonar.sources>
+        <sonar.tests>src/test/java</sonar.tests>
+        <sonar.junit.reportPaths>target/surefire-reports</sonar.junit.reportPaths>
     </properties>
 
     <dependencies>
@@ -77,6 +83,13 @@
             <version>1.0.2</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-cucumber7-jvm</artifactId>
+            <version>2.29.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -104,21 +117,27 @@
 
                     <!-- Variables del sistema para las pruebas -->
                     <systemPropertyVariables>
-                        <BASE_URL>${BASE_URL}</BASE_URL>
-                        <LOGIN_USERNAME>${LOGIN_USERNAME}</LOGIN_USERNAME>
-                        <LOGIN_PASSWORD>${LOGIN_PASSWORD}</LOGIN_PASSWORD>
-                        <REGISTER_USERNAME>${REGISTER_USERNAME}</REGISTER_USERNAME>
-                        <REGISTER_EMAIL>${REGISTER_EMAIL}</REGISTER_EMAIL>
-                        <REGISTER_PASSWORD>${REGISTER_PASSWORD}</REGISTER_PASSWORD>
-                        <REGISTER_PHONE>${REGISTER_PHONE}</REGISTER_PHONE>
-                        <cucumber.plugin>pretty, json:target/cucumber.json, html:target/cucumber.html</cucumber.plugin>
+                        <cucumber.plugin>
+                            pretty, json:target/cucumber.json, html:target/cucumber.html, io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm
+                        </cucumber.plugin>
                         <cucumber.publish.quiet>true</cucumber.publish.quiet>
+                        <allure.results.directory>target/allure-results</allure.results.directory>
                     </systemPropertyVariables>
 
                     <!-- Permite ejecución paralela si deseas -->
                     <parallel>methods</parallel>
                     <threadCount>2</threadCount>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>io.qameta.allure</groupId>
+                <artifactId>allure-maven</artifactId>
+                <version>2.12.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>3.11.0.3922</version>
             </plugin>
         </plugins>
     </build>

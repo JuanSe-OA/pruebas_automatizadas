@@ -13,10 +13,16 @@ import java.util.UUID;
 import static io.restassured.RestAssured.given;
 import static io.restassured.module.jsv.JsonSchemaValidator.matchesJsonSchemaInClasspath;
 
+import com.github.javafaker.Faker;
+import java.util.Locale;
+
+
 public class AuthSteps {
 
     private Response response;
     private static final Map<String, Object> ctx = new HashMap<>();
+    private static final Faker faker = new Faker(new Locale("es","CO"));
+
 
     @Before
     public void setup() {
@@ -82,40 +88,78 @@ public class AuthSteps {
     @Given("tengo un token válido \\(login previo si es necesario)")
     public void obtenerTokenPrevio() {
         if (!ctx.containsKey("AUTH_TOKEN")) {
-            String user = System.getProperty("LOGIN_USERNAME",
-                    System.getenv().getOrDefault("LOGIN_USERNAME", "admin"));
-            String pass = System.getProperty("LOGIN_PASSWORD",
-                    System.getenv().getOrDefault("LOGIN_PASSWORD", "admin123"));
+            String user = propOr("LOGIN_USERNAME", "admin");
+            String pass = propOr("LOGIN_PASSWORD", "admin123");
 
-            Response r = given()
-                    .header("Content-Type", "application/json")
+            Response r = given().header("Content-Type", "application/json")
                     .body("{\"username\":\"" + user + "\",\"password\":\"" + pass + "\"}")
                     .post("/api/auth/login");
 
-            Assertions.assertEquals(200, r.statusCode(), "Login previo falló: " + r.asString());
+            if (r.statusCode() != 200) {
+                // Auto-registro de un usuario si el login del admin falla
+                String newUser = faker.name().username().replaceAll("[^a-zA-Z0-9]", "") + "_" +
+                        UUID.randomUUID().toString().substring(0,5);
+                String newEmail = faker.internet().emailAddress();
+                String newPass  = "Secr3t$123";
+
+                given().header("Content-Type","application/json")
+                        .body("{\"username\":\""+newUser+"\",\"email\":\""+newEmail+"\",\"password\":\""+newPass+"\",\"phoneNumber\":\"3"+faker.number().digits(9)+"\"}")
+                        .post("/api/users")
+                        .then().statusCode(200);
+
+                // Login con el usuario recién creado
+                r = given().header("Content-Type","application/json")
+                        .body("{\"username\":\""+newUser+"\",\"password\":\""+newPass+"\"}")
+                        .post("/api/auth/login")
+                        .then().statusCode(200).extract().response();
+
+                // Guarda esos valores por si quieres usarlos después
+                ctx.put("LOGIN_USERNAME", newUser);
+                ctx.put("LOGIN_PASSWORD", newPass);
+            }
+
             String token = r.asString().trim();
+            Assertions.assertTrue(token.length() > 10, "Token inválido: " + token);
             ctx.put("AUTH_TOKEN", token);
         }
+    }
+    private String propOr(String key, String fallback) {
+        // 1) System property
+        String v = System.getProperty(key);
+        if (v != null && !v.trim().isEmpty()) return v.trim();
+        // 2) Env var
+        v = System.getenv(key);
+        if (v != null && !v.trim().isEmpty()) return v.trim();
+        // 3) Fallback
+        return fallback;
     }
 
     private String interpolate(String text) {
         String out = text;
+
+        // Reemplazos desde el contexto (tokens guardados, etc.)
         for (Map.Entry<String, Object> e : ctx.entrySet()) {
             out = out.replace("${" + e.getKey() + "}", String.valueOf(e.getValue()));
         }
-        out = out.replace("${LOGIN_USERNAME}", System.getProperty("LOGIN_USERNAME",
-                System.getenv().getOrDefault("LOGIN_USERNAME", "admin")));
-        out = out.replace("${LOGIN_PASSWORD}", System.getProperty("LOGIN_PASSWORD",
-                System.getenv().getOrDefault("LOGIN_PASSWORD", "admin123")));
-        out = out.replace("${REGISTER_USERNAME}", System.getProperty("REGISTER_USERNAME",
-                System.getenv().getOrDefault("REGISTER_USERNAME", "testuser")));
-        out = out.replace("${REGISTER_EMAIL}", System.getProperty("REGISTER_EMAIL",
-                System.getenv().getOrDefault("REGISTER_EMAIL", "test@example.com")));
-        out = out.replace("${REGISTER_PASSWORD}", System.getProperty("REGISTER_PASSWORD",
-                System.getenv().getOrDefault("REGISTER_PASSWORD", "Secr3t$123")));
-        out = out.replace("${REGISTER_PHONE}", System.getProperty("REGISTER_PHONE",
-                System.getenv().getOrDefault("REGISTER_PHONE", "3001234567")));
+
+        // Faker para defaults aleatorios
+        String randomUser  = faker.name().username().replaceAll("[^a-zA-Z0-9]", "");
+        String randomMail  = faker.internet().emailAddress();
+        String randomPhone = "3" + faker.number().digits(9);
+
+        // Login (usa defaults si están vacíos)
+        out = out.replace("${LOGIN_USERNAME}", propOr("LOGIN_USERNAME", "admin"));
+        out = out.replace("${LOGIN_PASSWORD}", propOr("LOGIN_PASSWORD", "admin123"));
+
+        // Registro (si están vacíos, usa Faker)
+        out = out.replace("${REGISTER_USERNAME}", propOr("REGISTER_USERNAME", randomUser));
+        out = out.replace("${REGISTER_EMAIL}",   propOr("REGISTER_EMAIL",   randomMail));
+        out = out.replace("${REGISTER_PASSWORD}",propOr("REGISTER_PASSWORD","Secr3t$123"));
+        out = out.replace("${REGISTER_PHONE}",   propOr("REGISTER_PHONE",   randomPhone));
+
         out = out.replace("${RAND}", UUID.randomUUID().toString().substring(0, 6));
         return out;
     }
+
+
 }

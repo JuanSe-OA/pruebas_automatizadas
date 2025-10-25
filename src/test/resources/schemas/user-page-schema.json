@@ -9,9 +9,11 @@
         "type": "object",
         "required": ["username","email"],
         "properties": {
-          "id": { "type": ["integer","string"] },
-          "username": { "type": "string" },
-          "email": { "type": "string", "format": "email" }
+          "id":        { "type": ["integer","string"] },
+          "username":  { "type": "string" },
+          "email":     { "type": "string", "format": "email" },
+          "role":      { "type": "string" },
+          "phoneNumber": { "type": "string" }
         },
         "additionalProperties": true
       }
