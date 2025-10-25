@@ -1,53 +1,99 @@
 pipeline {
-  agent any
+	agent any
 
-  environment {
-    BASE_URL = 'http://auth-app:8081'   // o 8080 según tu compose
-    SONARQUBE_ENV = 'sonar-local'       // nombre configurado en Jenkins
-  }
+	/***********************
+	 * Herramientas/JDK
+	 ***********************/
+	tools {
+		// Usa el nombre EXACTO del Maven que ves en Manage Jenkins > Tools (en tus logs salió "MAVEN")
+		maven 'MAVEN'
+		// Si definiste un JDK en Tools, puedes declararlo así:
+		// jdk 'JDK17'
+	}
 
-  tools {
-    maven 'Maven 3.9.11'                  // el nombre que configuraste en Jenkins
-    jdk 'JDK17'                          // opcional si definiste un JDK en Jenkins
-  }
+	/***********************
+	 * Variables de entorno
+	 ***********************/
+	environment {
+		// Desde el contenedor de Jenkins, llama al auth por NOMBRE DE SERVICIO del compose
+		// Ajusta el puerto si tu auth-app corre en otro (8081, etc.)
+		BASE_URL = 'http://auth-app:8080'
+		// Nombre del servidor Sonar configurado en Manage Jenkins > System
+		SONARQUBE_ENV = 'sonar-local'
+	}
 
-  stages {
-    stage('Checkout') {
-      steps { checkout scm }
-    }
+	options {
+		// Mantiene logs más limpios
+		timestamps()
+		ansiColor('xterm')
+		// Falta una etapa => marca el build como fallo
+		disableConcurrentBuilds()
+	}
 
-    stage('Test') {
-      steps {
-        sh "mvn -q clean test -DBASE_URL=${BASE_URL}"
-      }
-      post {
-        always {
-          junit '**/target/surefire-reports/*.xml'
-          // Si activaste Allure en el pom:
-          allure includeProperties: false, jdk: '', results: [[path: 'target/allure-results']]
-        }
-      }
-    }
+	stages {
+		stage('Checkout') {
+			steps {
+				// En "Pipeline script from SCM" este checkout usa la config del job
+				checkout scm
+			}
+		}
 
-    stage('SonarQube Analysis') {
-      steps {
-        withSonarQubeEnv("${SONARQUBE_ENV}") {
-          sh """
-             mvn -q -DskipTests sonar:sonar \
-                -Dsonar.projectKey=pruebas-auth \
-                -Dsonar.projectName=pruebas-auth \
-                -Dsonar.host.url=$SONAR_HOST_URL
+		stage('Test (Cucumber)') {
+			steps {
+				sh "mvn -q clean test -DBASE_URL=${BASE_URL}"
+			}
+			post {
+				always {
+					// Publica resultados JUnit para ver escenarios/steps fallidos
+					junit '**/target/surefire-reports/*.xml'
+
+					// --- Publicación de Allure sin depender del plugin de Jenkins ---
+					// Genera el reporte estático con Maven y publícalo como HTML
+					sh "mvn -q io.qameta.allure:allure-maven:2.12.0:report"
+					publishHTML(target: [
+						reportDir: 'target/site/allure-maven-plugin',
+						reportFiles: 'index.html',
+						reportName: 'Allure Report',
+						keepAll: true,
+						alwaysLinkToLastBuild: true,
+						allowMissing: false
+					])
+				}
+			}
+		}
+
+		stage('SonarQube Analysis') {
+			steps {
+				// Inyecta SONAR_HOST_URL + TOKEN configurados en Jenkins (Manage Jenkins > System > SonarQube servers)
+				withSonarQubeEnv("${SONARQUBE_ENV}") {
+					sh """
+            mvn -q -DskipTests sonar:sonar \
+              -Dsonar.projectKey=pruebas-auth \
+              -Dsonar.projectName=pruebas-auth
           """
-        }
-      }
-    }
+				}
+			}
+		}
 
-    stage('Quality Gate') {
-      steps {
-        timeout(time: 2, unit: 'MINUTES') {
-          script { waitForQualityGate abortPipeline: true }
-        }
-      }
-    }
-  }
+		stage('Quality Gate') {
+			steps {
+				script {
+					// Para que funcione de inmediato, crea el webhook en Sonar:
+					// Administration > Configuration > Webhooks -> http://jenkins:8080/sonarqube-webhook/
+					timeout(time: 2, unit: 'MINUTES') {
+						waitForQualityGate abortPipeline: true
+					}
+				}
+			}
+		}
+	}
+
+	post {
+		failure {
+			echo '❌ Build failed.'
+		}
+		success {
+			echo '✅ Build ok: tests + Sonar + reportes listos.'
+		}
+	}
 }
