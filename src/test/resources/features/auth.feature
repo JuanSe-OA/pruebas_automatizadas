@@ -1,4 +1,5 @@
-Feature: Autenticación y gestión de usuarios (Reto 2)
+@auth
+Feature: Autenticación y gestión de usuarios
   Como cliente del API
   Quiero validar registro, login y recursos protegidos
   Para asegurar el correcto funcionamiento del microservicio
