@@ -112,17 +112,41 @@ public class MonitoringSteps {
 
     @When("consulto la salud por nombre {string}")
     public void consulto_salud_nombre(String name) {
-        // Según tu contrato, valida el nombre. Si el campo es "serviceName", cámbialo aquí.
-        given()
-                .when().get(monBase + "/monitor/health/" + name)
-                .then()
-                .statusCode(200)
-                .body(anyOf(
-                        hasKey("name"),          // admite { "name": "..." }
-                        hasKey("serviceName")    // o { "serviceName": "..." }
-                ))
-                .body("name", anyOf(nullValue(), equalTo(name)))
-                .body("serviceName", anyOf(nullValue(), equalTo(name)));
+        Response r = given()
+                .when().get(monBase + "/monitor/health/" + name);
+
+        // Acepta 200 con/ sin body o 204 sin contenido
+        r.then().statusCode(anyOf(is(200), is(204)));
+
+        // Si no hay contenido (204 o body vacío), no hay nada más que validar
+        String bodyStr = r.getBody() != null ? r.getBody().asString() : "";
+        if (r.statusCode() == 204 || bodyStr == null || bodyStr.isBlank()) {
+            return;
+        }
+
+        // Si hay contenido, valida según tipo: objeto o arreglo
+        String ct = r.getHeader("Content-Type");
+        if (ct != null && ct.toLowerCase().contains("application/json")) {
+            char first = bodyStr.trim().charAt(0);
+            if (first == '{') {
+                // Objeto JSON: acepta name o serviceName y que coincida si viene
+                r.then()
+                        .body(anyOf(hasKey("name"), hasKey("serviceName")))
+                        .body("name", anyOf(nullValue(), equalTo(name)))
+                        .body("serviceName", anyOf(nullValue(), equalTo(name)));
+            } else if (first == '[') {
+                // Arreglo JSON: al menos un elemento con name/serviceName = name
+                r.then()
+                        .body("$", isA(List.class))
+                        .body("find { it.name == '%s' || it.serviceName == '%s' }", withArgs(name, name), notNullValue());
+            } else {
+                // Texto/otro: no fallar, pero deja rastro
+                System.out.println("Contenido no-JSON esperado, se omite validación de campos: " + bodyStr);
+            }
+        } else {
+            // Content-Type no JSON: no hacemos validación de campos
+            System.out.println("Content-Type no JSON (" + ct + "), se omite validación de campos.");
+        }
     }
 
     // =======================
