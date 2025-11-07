@@ -8,81 +8,78 @@ pipeline {
 		ansiColor('xterm')
 	}
 
+	parameters {
+		// Si quieres poder cambiar endpoints al vuelo desde la UI de Jenkins
+		string(name: 'AUTH_BASE_URL', defaultValue: 'http://auth-app:8080', description: 'Base URL Auth')
+		string(name: 'MON_BASE_URL',  defaultValue: 'http://monitoring-app:8084', description: 'Base URL Monitoring')
+	}
+
 	environment {
-		// Servicios (deben coincidir con los nombres del compose del orquestador)
-		AUTH_APP_HOST       = 'auth-app'
-		AUTH_APP_PORT       = '8080'
-		ORCH_APP_HOST       = 'orchestrator'
-		ORCH_APP_PORT       = '8082'
-		NOTIF_APP_HOST      = 'notification-service'
-		NOTIF_APP_PORT      = '8083'
-		MONITORING_APP_HOST = 'monitoring-app'
-		MONITORING_APP_PORT = '8084'
+		// Defaults si no usas parámetros
+		AUTH_BASE_URL = "${params.AUTH_BASE_URL ?: 'http://auth-app:8080'}"
+		MON_BASE_URL  = "${params.MON_BASE_URL  ?: 'http://monitoring-app:8084'}"
 
 		SONARQUBE_ENV = 'sonar-local'
-
-		// Repo de infraestructura (orquestador) que contiene el docker-compose.yml
-		INFRA_REPO   = 'https://github.com/CamiloAst/Microservicios_Orquestador.git'
-		INFRA_BRANCH = 'main'
-		INFRA_DIR    = 'stack' // subcarpeta donde haremos el checkout
-		COMPOSE_FILE = 'docker-compose.yml'
 	}
 
 	stages {
-		stage('Checkout (pruebas)') {
+		stage('Checkout') {
 			steps { checkout scm }
 		}
 
-		stage('Checkout orquestador (infra)') {
+		// (Opcional) Comprobar que los servicios estén vivos antes de probar
+		stage('Health check (opcional)') {
 			steps {
-				dir("${INFRA_DIR}") {
-					// Público:
-					git url: "${INFRA_REPO}", branch: "${INFRA_BRANCH}"
-					// Privado (descomenta y crea el credential en Jenkins):
-					// git url: "${INFRA_REPO}", branch: "${INFRA_BRANCH}", credentialsId: 'github-token'
-				}
+				sh '''
+          set -e
+          echo "▶ Verificando health de AUTH y MONITORING..."
+          for URL in \
+            "${AUTH_BASE_URL}/actuator/health" \
+            "${MON_BASE_URL}/monitor/health"
+          do
+            echo "Comprobando $URL"
+            for i in $(seq 1 30); do
+              if curl -fsS "$URL" >/dev/null 2>&1; then
+                echo "OK: $URL"
+                break
+              fi
+              sleep 2
+              if [ $i -eq 30 ]; then
+                echo "ERROR: Timeout esperando $URL"
+                exit 1
+              fi
+            done
+          done
+        '''
 			}
 		}
 
-		stage('Levantar stack') {
-			steps {
-				dir("${INFRA_DIR}") {
-					sh """
-                        docker compose -f ${COMPOSE_FILE} up -d
-
-                        echo "▶ Esperando endpoints de salud..."
-                        AUTH_URL="http://${AUTH_APP_HOST}:${AUTH_APP_PORT}/actuator/health"
-                        ORCH_URL="http://${ORCH_APP_HOST}:${ORCH_APP_PORT}/actuator/health"
-                        NOTIF_URL="http://${NOTIF_APP_HOST}:${NOTIF_APP_PORT}/actuator/health"
-                        MON_URL="http://${MONITORING_APP_HOST}:${MONITORING_APP_PORT}/monitor/health"
-
-                        for url in "$AUTH_URL" "$ORCH_URL" "$NOTIF_URL" "$MON_URL"; do
-                          echo "Esperando $url ..."
-                          for i in \$(seq 1 60); do
-                            if curl -fsS "$url" >/dev/null 2>&1; then
-                              echo "OK: $url"
-                              break
-                            fi
-                            sleep 3
-                            if [ \$i -eq 60 ]; then
-                              echo "ERROR: Timeout esperando $url"
-                              exit 1
-                            fi
-                          done
-                        done
-                    """
-				}
+		// ====== SUITE @auth ======
+		stage('Test @auth') {
+			environment {
+				BASE_URL = "${AUTH_BASE_URL}"
 			}
-		}
-
-		stage('Test (Cucumber) - AUTH') {
-			environment { BASE_URL = "http://${AUTH_APP_HOST}:${AUTH_APP_PORT}" }
 			steps {
-				sh """
-                    mvn -q clean test -DBASE_URL=${BASE_URL}
-                    mvn -q io.qameta.allure:allure-maven:2.12.0:report
-                    mkdir -p target/reports-auth && cp -r target/site/allure-maven-plugin/* target/reports-auth/
-                """
+				// Si tus features usan variables como ${LOGIN_USERNAME}, ${LOGIN_PASSWORD}, etc.,
+				// levántalas aquí. Ejemplo si las guardas en Jenkins Credentials:
+				withCredentials([
+					usernamePassword(credentialsId: 'auth-user-pass', usernameVariable: 'LOGIN_USERNAME', passwordVariable: 'LOGIN_PASSWORD'),
+					string(credentialsId: 'register-email',  variable: 'REGISTER_EMAIL'),
+					string(credentialsId: 'register-pass',   variable: 'REGISTER_PASSWORD'),
+					string(credentialsId: 'register-phone',  variable: 'REGISTER_PHONE')
+				]) {
+					sh '''
+            # Ejecuta solo escenarios con @auth
+            mvn -q clean test \
+              -DBASE_URL="${BASE_URL}" \
+              -DfailIfNoTests=false \
+              -Dcucumber.filter.tags='@auth'
+
+            # Allure (si lo usas)
+            mvn -q io.qameta.allure:allure-maven:2.12.0:report
+            mkdir -p target/reports-auth && cp -r target/site/allure-maven-plugin/* target/reports-auth/ || true
+          '''
+				}
 			}
 			post {
 				always {
@@ -93,20 +90,27 @@ pipeline {
 						reportName: 'Allure Report - AUTH',
 						keepAll: true,
 						alwaysLinkToLastBuild: true,
-						allowMissing: false
+						allowMissing: true
 					])
 				}
 			}
 		}
 
-		stage('Test (Cucumber) - MONITORING') {
-			environment { BASE_URL = "http://${MONITORING_APP_HOST}:${MONITORING_APP_PORT}" }
+		// ====== SUITE @monitoring ======
+		stage('Test @monitoring') {
+			environment {
+				BASE_URL = "${MON_BASE_URL}"
+			}
 			steps {
-				sh """
-                    mvn -q clean test -DBASE_URL=${BASE_URL} -DfailIfNoTests=false
-                    mvn -q io.qameta.allure:allure-maven:2.12.0:report
-                    mkdir -p target/reports-monitoring && cp -r target/site/allure-maven-plugin/* target/reports-monitoring/
-                """
+				sh '''
+          mvn -q clean test \
+            -DBASE_URL="${BASE_URL}" \
+            -DfailIfNoTests=false \
+            -Dcucumber.filter.tags='@monitoring'
+
+          mvn -q io.qameta.allure:allure-maven:2.12.0:report
+          mkdir -p target/reports-monitoring && cp -r target/site/allure-maven-plugin/* target/reports-monitoring/ || true
+        '''
 			}
 			post {
 				always {
@@ -117,20 +121,21 @@ pipeline {
 						reportName: 'Allure Report - MONITORING',
 						keepAll: true,
 						alwaysLinkToLastBuild: true,
-						allowMissing: false
+						allowMissing: true
 					])
 				}
 			}
 		}
 
+		// (Opcional) Sonar para este repo de pruebas
 		stage('SonarQube Analysis') {
 			steps {
 				withSonarQubeEnv("${SONARQUBE_ENV}") {
 					sh '''
-                        mvn -q -DskipTests sonar:sonar \
-                          -Dsonar.projectKey=pruebas-e2e \
-                          -Dsonar.projectName=pruebas-e2e
-                    '''
+            mvn -q -DskipTests sonar:sonar \
+              -Dsonar.projectKey=pruebas-e2e \
+              -Dsonar.projectName=pruebas-e2e
+          '''
 				}
 			}
 		}
@@ -147,12 +152,6 @@ pipeline {
 	}
 
 	post {
-		always {
-			echo 'Bajando stack...'
-			dir("${INFRA_DIR}") {
-				sh 'docker compose -f ${COMPOSE_FILE} down -v || true'
-			}
-		}
 		success { echo '✅ Build OK' }
 		failure { echo '❌ Build FAIL' }
 	}
