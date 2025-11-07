@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static io.restassured.RestAssured.withArgs;
 import static org.hamcrest.Matchers.*;
 
 /**
