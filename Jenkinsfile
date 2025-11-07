@@ -65,8 +65,9 @@ pipeline {
 						-Dcucumber.filter.tags='@monitoring'
 
 					# Generar reporte Allure
-					mvn -q io.qameta.allure:allure-maven:2.12.0:report
-					mkdir -p target/reports-monitoring && cp -r target/site/allure-maven-plugin/* target/reports-monitoring/ || true
+					mvn -q io.qameta.allure:allure-maven:2.12.0:report || true
+					mkdir -p target/reports-monitoring
+					cp -r target/site/allure-maven-plugin/* target/reports-monitoring/ 2>/dev/null || true
 				"""
 			}
 			post {
