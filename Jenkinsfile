@@ -1,9 +1,7 @@
 pipeline {
 	agent any
 
-	tools {
-		maven 'MAVEN'
-	}
+	tools { maven 'MAVEN' }
 
 	options {
 		timestamps()
@@ -11,19 +9,18 @@ pipeline {
 	}
 
 	environment {
-		// Puertos/hosts según tu docker-compose (red interna)
-		AUTH_APP_HOST        = 'auth-app'
-		AUTH_APP_PORT        = '8080'
-
-		MONITORING_APP_HOST  = 'monitoring-app'
-		MONITORING_APP_PORT  = '8084'
-
-		// Sonar en Jenkins (Manage Jenkins > Configure System)
-		SONARQUBE_ENV        = 'sonar-local'
+		AUTH_APP_HOST       = 'auth-app'
+		AUTH_APP_PORT       = '8080'
+		ORCH_APP_HOST       = 'orchestrator'
+		ORCH_APP_PORT       = '8082'
+		NOTIF_APP_HOST      = 'notification-service'
+		NOTIF_APP_PORT      = '8083'
+		MONITORING_APP_HOST = 'monitoring-app'
+		MONITORING_APP_PORT = '8084'
+		SONARQUBE_ENV       = 'sonar-local'
 	}
 
 	stages {
-
 		stage('Checkout') {
 			steps { checkout scm }
 		}
@@ -31,16 +28,16 @@ pipeline {
 		stage('Levantar stack') {
 			steps {
 				sh '''
-          # Sube servicios (ajusta ruta si tu compose no está en la raíz)
           docker compose -f docker-compose.yml up -d
 
-          echo "▶ Esperando /health de los servicios..."
-          AUTH_URL="http://'${AUTH_APP_HOST}':'${AUTH_APP_PORT}'/health"
-          MON_URL="http://'${MONITORING_APP_HOST}':'${MONITORING_APP_PORT}'/health"
+          echo "▶ Esperando endpoints de salud..."
+          AUTH_URL="http://'${AUTH_APP_HOST}':'${AUTH_APP_PORT}'/actuator/health"
+          ORCH_URL="http://'${ORCH_APP_HOST}':'${ORCH_APP_PORT}'/actuator/health"
+          NOTIF_URL="http://'${NOTIF_APP_HOST}':'${NOTIF_APP_PORT}'/actuator/health"
+          MON_URL="http://'${MONITORING_APP_HOST}':'${MONITORING_APP_PORT}'/monitor/health"
 
-          for url in "$AUTH_URL" "$MON_URL"; do
+          for url in "$AUTH_URL" "$ORCH_URL" "$NOTIF_URL" "$MON_URL"; do
             echo "Esperando $url ..."
-            # 60 intentos x 3s = ~3 minutos
             for i in $(seq 1 60); do
               if curl -fsS "$url" >/dev/null 2>&1; then
                 echo "OK: $url"
@@ -58,14 +55,10 @@ pipeline {
 		}
 
 		stage('Test (Cucumber) - AUTH') {
-			environment {
-				BASE_URL = "http://${AUTH_APP_HOST}:${AUTH_APP_PORT}"
-			}
+			environment { BASE_URL = "http://${AUTH_APP_HOST}:${AUTH_APP_PORT}" }
 			steps {
 				sh """
-          mvn -q clean test \
-            -DBASE_URL=${BASE_URL}
-
+          mvn -q clean test -DBASE_URL=${BASE_URL}
           mvn -q io.qameta.allure:allure-maven:2.12.0:report
           mkdir -p target/reports-auth && cp -r target/site/allure-maven-plugin/* target/reports-auth/
         """
@@ -86,17 +79,11 @@ pipeline {
 		}
 
 		stage('Test (Cucumber) - MONITORING') {
-			environment {
-				BASE_URL = "http://${MONITORING_APP_HOST}:${MONITORING_APP_PORT}"
-			}
+			environment { BASE_URL = "http://${MONITORING_APP_HOST}:${MONITORING_APP_PORT}" }
 			steps {
 				sh """
-          mvn -q clean test \
-            -DBASE_URL=${BASE_URL} \
-            -DfailIfNoTests=false
-            # Si taggeas escenarios de monitoring, usa:
-            # -Dcucumber.filter.tags='@monitoring'
-
+          mvn -q clean test -DBASE_URL=${BASE_URL} -DfailIfNoTests=false
+          # Si usas tags, agrega: -Dcucumber.filter.tags='@monitoring'
           mvn -q io.qameta.allure:allure-maven:2.12.0:report
           mkdir -p target/reports-monitoring && cp -r target/site/allure-maven-plugin/* target/reports-monitoring/
         """
