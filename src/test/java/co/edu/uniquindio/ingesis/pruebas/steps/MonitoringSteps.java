@@ -57,7 +57,7 @@ public class MonitoringSteps {
                 "name", name,
                 "url", "http://auth-app:8080/actuator/health",
                 "frequency", 30,
-                "emails", List.of("admin@test.com")
+                "emails", List.of("j.kamilo3020@gmail.com")
         );
         given().contentType(ContentType.JSON).body(body)
                 .when().post(monBase + "/monitor/register")
