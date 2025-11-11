@@ -52,16 +52,54 @@ public class MonitoringSteps {
     }
 
     @When("registro para monitoreo el servicio {string}")
-    public void registro_servicio(String name) {
+    public void registro_servicio(String name) throws InterruptedException {
+        // Primero verifica si YA existe para evitar 500 del backend
+        if (existeServicio(name)) {
+            // ya está registrado → idempotente
+            return;
+        }
+
         Map<String, Object> body = Map.of(
-                "name", name,
-                "url", "http://auth-app:8080/actuator/health",
-                "frequency", 30,
+                "serviceName", name,
+                "host", "auth-app",
+                "port", 8080,
+                "healthEndpoint", "/actuator/health",
                 "emails", List.of("j.kamilo3020@gmail.com")
         );
-        given().contentType(ContentType.JSON).body(body)
-                .when().post(monBase + "/monitor/register")
-                .then().statusCode(anyOf(is(200), is(201), is(409)));
+
+        // Pequeño retry por calentamiento (migraciones, etc.)
+        int attempts = 4;
+        AssertionError last = null;
+
+        for (int i = 1; i <= attempts; i++) {
+            try {
+                Response resp =
+                        given()
+                                .baseUri(monBase)
+                                .contentType(ContentType.JSON)
+                                .body(body)
+                                .when().post("/monitor/register");
+
+                // Log de respuesta si hay error para depurar en el log de Jenkins
+                if (resp.statusCode() >= 400) {
+                    resp.then().log().all();
+                }
+
+                resp.then().statusCode(anyOf(is(200), is(201), is(409))); // tolera ya-existe
+
+                last = null;
+                break;
+            } catch (AssertionError e) {
+                last = e;
+                Thread.sleep(1500);
+            }
+        }
+        if (last != null) throw last;
+
+        // Verifica que ahora exista
+        given()
+                .when().get(monBase + "/monitor/health/" + name)
+                .then().statusCode(200);
     }
 
     @Then("listar la salud global retorna arreglo")
