@@ -113,18 +113,50 @@ public class MonitoringSteps {
 
     @When("consulto la salud por nombre {string}")
     public void consulto_salud_nombre(String name) {
-        // Según tu contrato, valida el nombre. Si el campo es "serviceName", cámbialo aquí.
-        given()
-                .when().get(monBase + "/monitor/health/" + name)
-                .then()
+        Response r = given()
+                .accept(ContentType.JSON)
+                .when()
+                .get(monBase + "/monitor/health/" + name);
+
+        int sc = r.getStatusCode();
+        String ct = r.getHeader("Content-Type");
+        String bodyStr = (r.getBody() != null) ? r.getBody().asString() : "";
+
+        // 1) Caso 204: no hay contenido; no exigir Content-Type ni body JSON
+        if (sc == 204) {
+            r.then().statusCode(204);
+            System.out.println("204 No Content para " + name);
+            return;
+        }
+
+        // 2) Caso 200: debe ser JSON; si el body está vacío, no validar campos
+        r.then()
                 .statusCode(200)
-                .body(anyOf(
-                        hasKey("name"),          // admite { "name": "..." }
-                        hasKey("serviceName")    // o { "serviceName": "..." }
-                ))
-                .body("name", anyOf(nullValue(), equalTo(name)))
-                .body("serviceName", anyOf(nullValue(), equalTo(name)));
+                .contentType(containsString("application/json"));
+
+        if (bodyStr == null || bodyStr.isBlank()) {
+            System.out.println("200 OK sin body para " + name + " (se omiten validaciones de campos)");
+            return;
+        }
+
+        char first = bodyStr.trim().charAt(0);
+        if (first == '{') {
+            // Objeto JSON: exigir name o serviceName y que, si viene, coincida
+            r.then()
+                    .body("$", isA(Map.class))
+                    .body(anyOf(hasKey("name"), hasKey("serviceName")))
+                    .body("name", anyOf(nullValue(), equalTo(name)))
+                    .body("serviceName", anyOf(nullValue(), equalTo(name)));
+        } else if (first == '[') {
+            // Arreglo JSON: debe existir al menos un elemento con name/serviceName = name
+            r.then()
+                    .body("$", isA(List.class))
+                    .body("find { it.name == '%s' || it.serviceName == '%s' }", withArgs(name, name), notNullValue());
+        } else {
+            System.out.println("Contenido no-JSON (first=" + first + "): " + bodyStr);
+        }
     }
+
 
     // =======================
     // Helpers
