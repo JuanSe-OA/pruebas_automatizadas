@@ -88,7 +88,7 @@ pipeline {
 		// ===== ANALISIS SONARQUBE =====
 		stage('SonarQube Analysis') {
 			steps {
-				withSonarQubeEnv("sonarlocal") {
+				withSonarQubeEnv("${SONARQUBE_ENV}") {
 					sh """
 						echo "🔹 Ejecutando análisis SonarQube..."
 						mvn -q -DskipTests sonar:sonar \
